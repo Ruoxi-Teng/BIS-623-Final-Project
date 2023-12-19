@@ -1,0 +1,199 @@
+---
+title: "BIS 633 Final Project"
+author: "Ruoxi Teng"
+date: "2023-12-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+load("C:/Users/Elaine.T/Downloads/BIS623_FinalProjectData.rda")
+library(tibble)
+library(dplyr)
+summary(data)
+library(psych)
+setwd("C:/Users/Elaine.T/Desktop/Adv Regression Model")
+```
+
+```{r}
+##Exploratory Data Analysis
+#missing data detection
+orig_data<-na.omit(data)
+describe(orig_data)
+table(orig_data$pnumlbw)
+table(orig_data$pnumsga)
+#we discovered that pnumlbw and pnumsga is 0 for all observed cases, therefore we drop the 2 varables
+data<-subset(orig_data,select=-c(pnumlbw,pnumsga))
+#correlation between variables
+#compute the correlation matrix
+cor_matrix <- cor(data, use = "complete.obs")
+# Plot
+library(corrplot)
+# Visualize the correlation matrix
+corrplot(cor_matrix, method = "color", order = "original",
+         tl.col = "black", tl.srt = 45)
+```
+
+```{r}
+# we further decide to drop wtgain, because it is calculated by delwt and ppwt, the there is some alias problem with it
+data<-subset(data,select=-wtgain)
+##We then start with a simple multiple linear regression model and check which variables are significantly correlated with birthweight
+model.1<-lm(bwt~.,data=data)
+summary(model.1)
+alias(model.1)
+# in the covariance matrix, we discovered that some of the variables are highly correlated, we further examine collinearity through calculating VIFs 
+library(car)
+round(cor(data),3)
+X=as.matrix(data)[,-4]
+e=eigen(t(X)%*%X)
+e$val
+vif(model.1)
+# we found out that ppweight ppbmi and mheight are highly correlated, to decide which variables to include,we would further do backward stepwise analysis for model.1
+
+# model.1.step<-step(model.1,direction="backward")
+# #we then refit the linear model with the variables includedin the backward stepwise
+# model.2<-lm(bwt ~ babysex + bhead + blength + delwt + fincome + gaweeks + menarche + mheight + momage + mrace + parity + ppwt + smoken,data=data)
+# summary(model.2)
+# model.3<-lm(bwt ~ babysex + bhead + blength + delwt + fincome + gaweeks + mheight + momage + mrace + parity + ppwt + smoken,data=data)
+# summary(model.3)
+##even though menarche has a coefficient that is not significant, the model including menarche yields a lower AIC and shows better model fitting, so we include menarche in our final selected variables
+
+```
+
+```{r}
+#then we plot the diagnosis plot for model.1
+library(ggfortify)
+library(ggplot2)
+library(lmtest)
+autoplot(model.1, which = 1:2)
+# In the Residuals vs Fitted plot, points are not randomly scattered around zero. The pattern of points
+# indicates that the linearity assumption is violated. We can consider transform outcome bwt to solve
+# this problem.
+# In the Residuals vs Fitted plot, the variance of residuals is close to constant. As fitted value increases, the
+# variance of residual seems to remain constant, thus, the homogeneity assumption holds. We may also consider
+# using weighted least square to solve this problem.
+# The Normal Q-Q plot shows that some points severely deviate from reference dashed line, so the
+# normality assumption may not hold. 
+
+autoplot(model.1, which = 3:4)
+autoplot(model.1, which = 5:6)
+# In scale-location, Cook’s distance, and Cook’s dist vs Leverage plots, we can find some leverage
+# point/outliers/influential points.
+#residual plot
+plot( residuals(model.1), ylab="Residuals")
+abline(h=0, col="red")
+plot(residuals (model.1)[-length(residuals(model.1))] , residuals (model.1)[-1] ,
+xlab= expression (e [i]) , ylab=expression (e[i + 1]))
+#Durbin-Watson test
+dwtest(model.1)
+# Durbin-Watson test show that residuals are correlated, so the independence assumption is violated.
+#check the distribution of bwt
+ggplot(data,aes(x=bwt))+ geom_histogram() +
+ggtitle("Histogram of infant birth weight") + theme(plot.title = element_text(hjust = 0.5))
+ggplot(data,aes(x=log(bwt)))+ geom_histogram() +
+ggtitle("Histogram of log(bwt)") + theme(plot.title = element_text(hjust = 0.5))
+# The histogram of bwt shows that it is quite balanced, but
+# we would take logarithm of bwt to check.
+```
+```{r}
+par(mfrow = c(1, 2))
+plot( residuals(model.1), ylab="Residuals")
+abline(h=0, col="red")
+plot(residuals (model.1)[-length(residuals(model.1))] , residuals (model.1)[-1] ,
+xlab= expression (e [i]) , ylab=expression (e[i + 1]))
+#Durbin-Watson test
+#check the distribution of bwt
+par(mfrow = c(1, 2))
+ggplot(data,aes(x=bwt))+ geom_histogram() +
+ggtitle("Histogram of infant birth weight") + theme(plot.title = element_text(hjust = 0.5))
+ggplot(data,aes(x=log(bwt)))+ geom_histogram() +
+ggtitle("Histogram of log(bwt)") + theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+
+```{r}
+#we identified several outlier points through the diagnosis plot and further deletes them
+data_filtered<-data[!rownames(data)%in%c("3300","5295","5325"), ]
+```
+
+
+```{r}
+#the diagnosis plot also shows that the simple multiple linear regression model doesn't fit very well
+#we start with a log transformation
+model.2<-lm(log(bwt)~.,data=data_filtered)
+summary(model.2)
+autoplot(model.2, which = 1:6)
+dwtest(model.2)
+# the dw test result shows that residuals are correlated and the basic multiple linear regression model should not be used
+#then we use weighted least square estimation
+wts <- 1/(fitted(model.2))^2
+model.3<-lm(log(bwt)~.,data=data_filtered,weights=wts)
+summary(model.3)
+autoplot(model.3, which = 1:6)
+#we decide to further clear high leverage points and refit the model
+data_filtered_new <- data_filtered[!rownames(data_filtered) %in% c("6918","10026","3939"),]
+```
+```{r}
+#within the trimmed data, we found the final model with log transformation
+model.4<-lm(log(bwt)~.,data=data_filtered_new)
+wts.1 <- 1/(fitted(model.4))^2
+model.5<-lm(log(bwt)~.,data=data_filtered_new,weights=wts.1)
+model.5.step<-step(model.5,direction="backward")
+#from the backward selection using AIC as criteria, we identified the final model with log transformation and lweighted least squares
+model.6<-lm(log(bwt) ~ babysex + bhead + blength + delwt + fincome + gaweeks + 
+    momage + mrace + parity + ppwt + smoken,data=data_filtered_new,weights=wts.1)
+summary(model.6)
+confint(model.6)
+autoplot(model.6, which = 1:6)
+plot( residuals(model.6), ylab="Residuals")
+abline(h=0, col="red")
+plot(residuals (model.6)[-length(residuals(model.6))] , residuals (model.6)[-1] ,
+xlab= expression (e [i]) , ylab=expression (e[i + 1]))
+library(broom)
+model.6 %>% tidy %>% write.csv(file = "model.6.tidy.csv")
+```
+
+```{r}
+#final model implementation lars/lasso regression
+library(MASS)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(glmnet)
+X = as.matrix(data_filtered_new[,-4])
+y = data_filtered_new[,4]
+la.eq <- glmnet(X, y, family="gaussian", 
+                intercept = F, alpha=1)
+plot(la.eq,xvar = "lambda", label = F)
+mod_cv <- cv.glmnet(x=X, y=y, family="gaussian", # default nfolds = 10
+                    intercept = F, alpha=1)
+plot(mod_cv) 
+best_lambda <- mod_cv$lambda.min
+best_lambda
+model.lasso = glmnet(X, y, lambda = best_lambda,alpha=1)
+coef(model.lasso)
+```
+```{r}
+#final model implementation lars/lasso regression if we just let lasso do the model selection
+library(MASS)
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(glmnet)
+load("C:/Users/Elaine.T/Downloads/BIS623_FinalProjectData.rda")
+X = as.matrix(data[,-4])
+y = data[,4]
+la.eq.1 <- glmnet(X, y, family="gaussian", 
+                intercept = F, alpha=1)
+plot(la.eq.1,xvar = "lambda", label = F)
+mod_cv.1 <- cv.glmnet(x=X, y=y, family="gaussian", # default nfolds = 10
+                    intercept = F, alpha=1)
+plot(mod_cv.1) 
+best_lambda.1 <- mod_cv.1$lambda.min
+best_lambda.1
+model.lasso.1 = glmnet(X, y, lambda = best_lambda.1,alpha=1)
+coef(model.lasso.1)
+# library(broom)
+# model.lasso.1 %>% tidy %>% write.csv(file = "model.lasso.1.tidy.csv")
+```
+
